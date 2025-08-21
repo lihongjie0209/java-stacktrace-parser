@@ -1,6 +1,14 @@
 # Java Stack Trace Parser
 
+[![Deploy to Cloudflare Workers](https://github.com/lihongjie0209/java-stacktrace-parser/actions/workflows/deploy.yml/badge.svg)](https://github.com/lihongjie0209/java-stacktrace-parser/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 一个基于 Cloudflare Workers 的 Java 堆栈跟踪解析工具，支持从文本和 JSON 字段中提取、解析和格式化 Java 异常堆栈跟踪。
+
+## 🌟 在线演示
+
+- **生产环境**: https://java-stacktrace-parser-prod.your-account.workers.dev
+- **测试环境**: https://java-stacktrace-parser-staging.your-account.workers.dev
 
 ## 功能特性
 
@@ -118,6 +126,29 @@ npm run build
 ```bash
 npm run deploy
 ```
+
+## 🚀 CI/CD 流水线
+
+项目使用 GitHub Actions 实现自动化 CI/CD：
+
+### 工作流程
+1. **测试阶段**: 运行单元测试和构建检查
+2. **生产部署**: 推送到 `master` 分支自动部署到生产环境
+3. **预览部署**: Pull Request 自动部署到测试环境
+
+### GitHub Secrets 配置
+要启用自动部署，需要在 GitHub 仓库中配置以下 secrets：
+
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API Token
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare Account ID
+
+详细配置说明请参考 [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+## 📊 监控和日志
+
+- **GitHub Actions**: 查看部署流水线状态
+- **Cloudflare Dashboard**: 监控应用性能和日志
+- **健康检查**: `GET /health` 接口
 
 ## 项目结构
 
