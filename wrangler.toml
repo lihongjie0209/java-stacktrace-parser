@@ -9,8 +9,12 @@ command = "npm run build"
 [env.production]
 name = "java-stacktrace-parser-prod"
 vars = { ENVIRONMENT = "production" }
+route = { pattern = "stack.lihongjie.cn/*", zone_name = "lihongjhe.cn" }
 
 # Staging environment  
 [env.staging]
 name = "java-stacktrace-parser-staging"
 vars = { ENVIRONMENT = "staging" }
+
+
+
