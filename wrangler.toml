@@ -9,7 +9,7 @@ command = "npm run build"
 [env.production]
 name = "java-stacktrace-parser-prod"
 vars = { ENVIRONMENT = "production" }
-route = { pattern = "stack.lihongjie.cn/*", zone_name = "lihongjhe.cn" }
+route = { pattern = "stack.lihongjie.cn/*", zone_name = "lihongjie.cn" }
 
 # Staging environment  
 [env.staging]
