@@ -148,6 +148,124 @@ Some log message after
       const result = StackTraceParser.extractStackTrace(input);
       expect(result).toBe('');
     });
+
+    it('should extract stack trace from incomplete JSON', () => {
+      const input = `{
+  "error": "java.lang.NullPointerException: Cannot invoke method\\n\\tat com.example.MyClass.myMethod(MyClass.java:25)\\n\\tat com.example.Main.main(Main.java:10)`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.NullPointerException');
+      expect(result).toContain('at com.example.MyClass.myMethod');
+      expect(result).toContain('at com.example.Main.main');
+    });
+
+    it('should extract stack trace from malformed JSON', () => {
+      const input = `"exception": "java.lang.RuntimeException: Service failed\\n\\tat com.example.Service.process(Service.java:100)\\n\\tat com.example.Controller.handle(Controller.java:50)`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.RuntimeException');
+      expect(result).toContain('at com.example.Service.process');
+      expect(result).toContain('at com.example.Controller.handle');
+    });
+
+    it('should extract stack trace from log file with escaped content', () => {
+      const input = `
+2024-08-21 10:30:45 [ERROR] Application error: "java.lang.IllegalStateException: Invalid state\\n\\tat com.example.StateMachine.transition(StateMachine.java:45)\\n\\tat com.example.Processor.execute(Processor.java:123)"
+2024-08-21 10:30:46 [INFO] Attempting recovery
+`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.IllegalStateException');
+      expect(result).toContain('at com.example.StateMachine.transition');
+      expect(result).toContain('at com.example.Processor.execute');
+    });
+
+    it('should extract stack trace with unicode escapes', () => {
+      const input = `{
+  "error": "java.lang.Exception: Unicode test \\u0041\\u0042\\n\\tat com.example.Test.method(Test.java:10)\\n\\tat com.example.Main.main(Main.java:5)"
+}`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.Exception');
+      expect(result).toContain('Unicode test AB'); // Unicode should be decoded
+      expect(result).toContain('at com.example.Test.method');
+    });
+
+    it('should extract stack trace with hex escapes', () => {
+      const input = `{
+  "error": "java.lang.Exception: Hex test \\x41\\x42\\n\\tat com.example.Test.method(Test.java:10)"
+}`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.Exception');
+      expect(result).toContain('Hex test AB'); // Hex should be decoded
+      expect(result).toContain('at com.example.Test.method');
+    });
+
+    it('should extract complex stack trace from mixed log content', () => {
+      const input = `
+Some application log before
+WARNING: Connection timeout detected
+ERROR: Request failed with "java.sql.SQLException: Database connection lost\\n\\tat com.example.db.ConnectionManager.getConnection(ConnectionManager.java:89)\\n\\tat com.example.service.UserService.findUser(UserService.java:45)\\nCaused by: java.net.SocketTimeoutException: Read timeout\\n\\tat java.base/java.net.SocketInputStream.read(SocketInputStream.java:115)"
+INFO: Retry mechanism activated
+`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.sql.SQLException');
+      expect(result).toContain('at com.example.db.ConnectionManager.getConnection');
+      expect(result).toContain('Caused by: java.net.SocketTimeoutException');
+      expect(result).toContain('at java.base/java.net.SocketInputStream.read');
+      expect(result).not.toContain('WARNING:');
+      expect(result).not.toContain('INFO:');
+    });
+
+    it('should extract stack trace from incomplete JSON array', () => {
+      const input = `[
+  {
+    "level": "ERROR",
+    "message": "Processing failed"
+  },
+  {
+    "exception": "java.lang.NullPointerException: Null value encountered\\n\\tat com.example.Validator.validate(Validator.java:67)\\n\\tat com.example.Processor.process(Processor.java:23)`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.NullPointerException');
+      expect(result).toContain('at com.example.Validator.validate');
+      expect(result).toContain('at com.example.Processor.process');
+    });
+
+    it('should handle very long escaped sequences', () => {
+      const stackTraceLines = [];
+      for (let i = 1; i <= 50; i++) {
+        stackTraceLines.push(`\\tat com.example.Class${i}.method${i}(Class${i}.java:${i * 10})`);
+      }
+      
+      const input = `"error": "java.lang.StackOverflowError: Deep recursion detected\\n${stackTraceLines.join('\\n')}"`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      expect(result).toContain('java.lang.StackOverflowError');
+      expect(result).toContain('at com.example.Class1.method1');
+      expect(result).toContain('at com.example.Class50.method50');
+    });
+
+    it('should prioritize serialized over regular stack traces', () => {
+      const input = `
+{
+  "error": "java.lang.NullPointerException: Serialized error\\n\\tat com.example.Serialized.method(Serialized.java:20)\\n\\tat com.example.Serialized.caller(Serialized.java:30)"
+}
+
+Regular stack trace in logs:
+java.lang.RuntimeException: Regular error
+	at com.example.Regular.method(Regular.java:10)
+`;
+      
+      const result = StackTraceParser.extractStackTrace(input);
+      // Should prefer the serialized one
+      expect(result).toContain('java.lang.NullPointerException');
+      expect(result).toContain('Serialized error');
+      expect(result).toContain('at com.example.Serialized.method');
+      expect(result).not.toContain('Regular error');
+    });
   });
 
   describe('parseStackTrace', () => {

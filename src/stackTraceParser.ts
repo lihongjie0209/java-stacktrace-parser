@@ -100,9 +100,36 @@ export class StackTraceParser {
   }
 
   /**
-   * Extract serialized stack trace from JSON strings
+   * Extract serialized stack trace from JSON strings or any text containing escaped stacktraces
    */
   private static extractSerializedStackTrace(input: string): string | null {
+    // Try multiple extraction strategies in order of preference
+    
+    // Strategy 1: Look for complete quoted JSON strings
+    const completeQuotedResult = this.extractFromQuotedStrings(input);
+    if (completeQuotedResult) {
+      return completeQuotedResult;
+    }
+    
+    // Strategy 2: Look for incomplete JSON or partial strings with escaped content
+    const incompleteJsonResult = this.extractFromIncompleteJson(input);
+    if (incompleteJsonResult) {
+      return incompleteJsonResult;
+    }
+    
+    // Strategy 3: Look for raw escaped sequences in any text
+    const rawEscapedResult = this.extractFromRawEscapedText(input);
+    if (rawEscapedResult) {
+      return rawEscapedResult;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extract from properly quoted JSON strings
+   */
+  private static extractFromQuotedStrings(input: string): string | null {
     // Pattern to match quoted strings that contain stack trace patterns
     const quotedStringPattern = /"([^"\\]*(\\.[^"\\]*)*)"/g;
     let match;
@@ -123,7 +150,139 @@ export class StackTraceParser {
   }
 
   /**
-   * Unescape JSON string content
+   * Extract from incomplete JSON or partial strings
+   */
+  private static extractFromIncompleteJson(input: string): string | null {
+    // Look for patterns that might be incomplete JSON with escaped stacktraces
+    // This handles cases like: "exception": "java.lang.Exception\\n\\tat...
+    // or even without proper closing quotes
+    
+    const incompletePatterns = [
+      // JSON field with escaped content (may be incomplete)
+      /"[^"]*":\s*"([^"\\]*(?:\\.[^"\\]*)*)/g,
+      // Just escaped content after a colon (incomplete JSON)
+      /:\s*"([^"\\]*(?:\\.[^"\\]*)*)/g,
+      // Content that looks like escaped stacktrace anywhere
+      /"([^"\\]*(?:\\.[^"\\]*)*(?:Exception|Error)[^"\\]*(?:\\.[^"\\]*)*)/g
+    ];
+    
+    for (const pattern of incompletePatterns) {
+      let match;
+      while ((match = pattern.exec(input)) !== null) {
+        const content = match[1];
+        const unescapedContent = this.unescapeJsonString(content);
+        
+        if (this.containsStackTracePatterns(unescapedContent)) {
+          return unescapedContent;
+        }
+      }
+      // Reset lastIndex for next pattern
+      pattern.lastIndex = 0;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extract from raw escaped text sequences
+   */
+  private static extractFromRawEscapedText(input: string): string | null {
+    // Look for escaped sequences that might be stacktraces even without JSON structure
+    // This handles cases where stacktraces are embedded in logs or other text formats
+    // Be more conservative to avoid false positives
+    
+    const escapedPatterns = [
+      // Any text containing \\n and Exception/Error patterns with at least one \\t
+      /([^"]*(?:Exception|Error)[^"]*\\n[^"]*\\t[^"]*at\s+[a-zA-Z_$][^"]*)/g,
+      // Text with multiple \\n, \\t and java package patterns
+      /([^"]*(?:java\.|com\.|org\.)[^"]*\\n[^"]*\\t[^"]*at\s+[^"]*(?:\\n[^"]*){1,})/g
+    ];
+    
+    for (const pattern of escapedPatterns) {
+      let match;
+      while ((match = pattern.exec(input)) !== null) {
+        const content = match[1];
+        
+        // Only process if it looks sufficiently like an escaped stacktrace
+        if (content.includes('\\n') && content.includes('\\t') && content.includes('at ')) {
+          // Try to find the longest meaningful escaped sequence
+          const extendedContent = this.extractExtendedEscapedSequence(input, match.index);
+          const unescapedContent = this.unescapeJsonString(extendedContent);
+          
+          if (this.containsStackTracePatterns(unescapedContent)) {
+            return unescapedContent;
+          }
+        }
+      }
+      // Reset lastIndex for next pattern
+      pattern.lastIndex = 0;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extract extended escaped sequence from a starting position
+   */
+  private static extractExtendedEscapedSequence(input: string, startIndex: number): string {
+    // Look backwards and forwards from the match to find the complete escaped sequence
+    let start = startIndex;
+    let end = startIndex;
+    
+    // Find the start of the escaped sequence (look for opening quote or whitespace)
+    while (start > 0 && 
+           input[start - 1] !== '"' && 
+           input[start - 1] !== ' ' && 
+           input[start - 1] !== '\t' && 
+           input[start - 1] !== '\n') {
+      start--;
+    }
+    
+    // Find the end of the escaped sequence
+    let escapeCount = 0;
+    let inEscape = false;
+    
+    for (let i = startIndex; i < input.length; i++) {
+      const char = input[i];
+      
+      if (char === '\\' && !inEscape) {
+        inEscape = true;
+        escapeCount++;
+      } else if (inEscape) {
+        inEscape = false;
+        if (char === 'n' || char === 't' || char === 'r') {
+          // Continue, this looks like an escape sequence
+        } else if (char === '"' || char === '\\') {
+          // Continue, this is an escaped quote or backslash
+        } else {
+          // Not a typical escape sequence, but continue for now
+        }
+      } else if (char === '"' && escapeCount > 0) {
+        // Might be the end of the escaped sequence
+        end = i;
+        break;
+      } else if (char === ' ' || char === '\t' || char === '\n') {
+        // Whitespace might indicate end
+        if (escapeCount >= 2) { // Only if we found some escapes
+          end = i;
+          break;
+        }
+      }
+      
+      if (i > startIndex + 2000) { // Prevent infinite loops
+        break;
+      }
+    }
+    
+    if (end <= startIndex) {
+      end = Math.min(input.length, startIndex + 1000); // Default to reasonable length
+    }
+    
+    return input.substring(start, end);
+  }
+
+  /**
+   * Unescape JSON string content with enhanced support for various escape sequences
    */
   private static unescapeJsonString(str: string): string {
     return str
@@ -131,27 +290,43 @@ export class StackTraceParser {
       .replace(/\\r/g, '\r')
       .replace(/\\t/g, '\t')
       .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\');
+      .replace(/\\\\/g, '\\')
+      .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\x([0-9a-fA-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
   }
 
   /**
-   * Check if content contains stack trace patterns
+   * Check if content contains stack trace patterns with enhanced detection
    */
   private static containsStackTracePatterns(content: string): boolean {
     const lines = content.split(/\r?\n/);
     let stackTraceLineCount = 0;
+    let hasExceptionLine = false;
+    let hasAtLine = false;
     
     for (const line of lines) {
       if (this.isStackTraceLine(line)) {
         stackTraceLineCount++;
-        // If we find at least 2 stack trace lines, consider it a valid stack trace
-        if (stackTraceLineCount >= 2) {
-          return true;
+        
+        // Track different types of stack trace elements
+        const trimmed = line.trim();
+        if (trimmed.match(/(?:Exception|Error)(?::\s*|$)/) || 
+            trimmed.match(/^Exception in thread/)) {
+          hasExceptionLine = true;
+        }
+        if (trimmed.match(/^\s*at\s+[a-zA-Z_$]/)) {
+          hasAtLine = true;
         }
       }
     }
     
-    return false;
+    // More sophisticated validation:
+    // - At least 2 stack trace lines, OR
+    // - At least 1 exception line and 1 at line, OR  
+    // - At least 3 lines that look like stack trace elements
+    return stackTraceLineCount >= 2 || 
+           (hasExceptionLine && hasAtLine) ||
+           stackTraceLineCount >= 3;
   }
 
   /**
